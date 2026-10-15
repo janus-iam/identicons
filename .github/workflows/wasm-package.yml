@@ -1,22 +1,25 @@
 name: WASM package
 
 on:
-    push:
-        tags: ["v*"]
-        paths:
-            - "crates/identicon-wasm"
-            - "crates/identicon-core"
-            - "Cargo.toml"
-            - "Cargo.lock"
+    workflow_call:
+        inputs:
+            version:
+                description: Semver without leading v (e.g. 0.1.12)
+                required: true
+                type: string
     workflow_dispatch:
+        inputs:
+            version:
+                description: Semver without leading v (e.g. 0.1.12)
+                required: true
+                type: string
 
 permissions:
     contents: read
     id-token: write
 
 concurrency:
-    # Same commit pushed as branch + tag triggers one run (cancels the other).
-    group: wasm-package-${{ github.sha }}
+    group: wasm-package-${{ inputs.version }}
     cancel-in-progress: true
 
 env:
@@ -54,9 +57,6 @@ jobs:
 
     publish:
         needs: build
-        if: >-
-            (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
-            || github.event_name == 'workflow_dispatch'
         runs-on: ubuntu-latest
         steps:
             - name: Download package artifact
@@ -69,14 +69,19 @@ jobs:
 
             - uses: actions/setup-node@v7
               with:
-                node-version: lts/*
+                  node-version: lts/*
 
-            - name: Set version from release tag
-              if: startsWith(github.ref, 'refs/tags/v')
+            - name: Validate and set package version
               working-directory: ${{ env.WASM_PKG_DIR }}
+              env:
+                  VERSION: ${{ inputs.version }}
               run: |
-                VERSION="${GITHUB_REF#refs/tags/v}"
-                bun pm pkg set "version=${VERSION}"
+                  if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+                    echo "::error::Invalid version '$VERSION' (expected semver without leading v, e.g. 0.1.12)"
+                    exit 1
+                  fi
+                  bun pm pkg set "version=${VERSION}"
+                  echo "Publishing @janus-iam/identicon-wasm@${VERSION}"
 
             - name: Publish to npm registry
               working-directory: ${{ env.WASM_PKG_DIR }}
