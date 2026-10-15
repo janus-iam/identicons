@@ -94,6 +94,7 @@ pub fn route_label(path: &str) -> &'static str {
         "/" => "/",
         "/health" => "/health",
         "/metrics" => "/metrics",
-        _ => "/{input}",
+        _ if path.starts_with("/v1/") => "/v1/{input}",
+        _ => "other",
     }
 }

@@ -44,7 +44,7 @@ section{margin-bottom:36px} h2{margin:0 0 8px;font-size:20px;text-transform:capi
 table{border-collapse:separate;border-spacing:12px 14px;margin-left:-12px}
 th{font-weight:600;text-align:center;color:#9aa0a6;font-size:13px} th.theme{text-align:left;color:#e8eaed;font-size:15px;text-transform:capitalize;width:8rem}
 img{width:104px;height:104px;border-radius:14px;display:block;background:#1c1f27}
-</style></head><body><h1>Comparaison des identicons</h1><p class="lead">Cinq personnes pour chaque thème et chaque moteur. Chaque image est servie par l'API, par exemple <code>/alice?engine=ribbon&amp;theme=nord&amp;size=104</code>. Sans <code>engine</code>, l'API utilise <code>ribbon</code>.</p>"#,
+</style></head><body><h1>Comparaison des identicons</h1><p class="lead">Cinq personnes pour chaque thème et chaque moteur. Chaque image est servie par l'API, par exemple <code>/v1/alice?engine=ribbon&amp;theme=nord&amp;size=104</code>. Sans <code>engine</code>, l'API utilise <code>ribbon</code>.</p>"#,
     );
     for engine in Engine::ALL {
         let name = engine.name();
@@ -60,7 +60,7 @@ img{width:104px;height:104px;border-radius:14px;display:block;background:#1c1f27
             html.push_str(&format!(r#"<tr><th class="theme">{theme}</th>"#));
             for person in GALLERY_PEOPLE {
                 html.push_str(&format!(
-                    r#"<td><img alt="{person}, moteur {name}, thème {theme}" width="104" height="104" loading="lazy" src="/{person}?engine={name}&theme={theme}&size=104"></td>"#
+                    r#"<td><img alt="{person}, moteur {name}, thème {theme}" width="104" height="104" loading="lazy" src="/v1/{person}?engine={name}&theme={theme}&size=104"></td>"#
                 ));
             }
             html.push_str("</tr>");
@@ -231,11 +231,13 @@ fn init_tracing() {
 }
 
 fn app(state: AppState) -> Router {
+    let v1 = Router::new().route("/{input}", get(identicon_handler));
+
     Router::new()
         .route("/", get(gallery_handler))
         .route("/health", get(health_handler))
         .route("/metrics", get(metrics_handler))
-        .route("/{input}", get(identicon_handler))
+        .nest("/v1", v1)
         .layer(middleware::from_fn_with_state(
             state.clone(),
             track_requests,
@@ -312,7 +314,7 @@ mod tests {
     async fn metrics_returns_prometheus_text() {
         let app = test_app();
         app.clone()
-            .oneshot(Request::get("/alice").body(Body::empty()).unwrap())
+            .oneshot(Request::get("/v1/alice").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -334,6 +336,7 @@ mod tests {
         assert!(text.contains("identicon_requests_total"));
         assert!(text.contains("identicon_render_duration_seconds"));
         assert!(text.contains("identicon_svg_size_bytes"));
+        assert!(text.contains(r#"/v1/{input}"#));
     }
 
     #[tokio::test]
@@ -341,7 +344,7 @@ mod tests {
         let response = test_app()
             .oneshot(
                 Request::builder()
-                    .uri("/alice")
+                    .uri("/v1/alice")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -370,11 +373,15 @@ mod tests {
 
         let default = app
             .clone()
-            .oneshot(Request::get("/alice").body(Body::empty()).unwrap())
+            .oneshot(Request::get("/v1/alice").body(Body::empty()).unwrap())
             .await
             .unwrap();
         let resized = app
-            .oneshot(Request::get("/alice?size=128").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::get("/v1/alice?size=128")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
@@ -393,13 +400,13 @@ mod tests {
 
         let omitted = app
             .clone()
-            .oneshot(Request::get("/alice").body(Body::empty()).unwrap())
+            .oneshot(Request::get("/v1/alice").body(Body::empty()).unwrap())
             .await
             .unwrap();
         let ribbon = app
             .clone()
             .oneshot(
-                Request::get("/alice?engine=ribbon")
+                Request::get("/v1/alice?engine=ribbon")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -408,7 +415,7 @@ mod tests {
         let blob = app
             .clone()
             .oneshot(
-                Request::get("/alice?engine=blob")
+                Request::get("/v1/alice?engine=blob")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -417,7 +424,7 @@ mod tests {
         let crest = app
             .clone()
             .oneshot(
-                Request::get("/alice?engine=crest")
+                Request::get("/v1/alice?engine=crest")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -425,7 +432,7 @@ mod tests {
             .unwrap();
         let unknown = app
             .oneshot(
-                Request::get("/alice?engine=nope")
+                Request::get("/v1/alice?engine=nope")
                     .body(Body::empty())
                     .unwrap(),
             )

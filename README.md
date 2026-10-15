@@ -13,9 +13,9 @@ Deterministic SVG identicons from any string, with several visual engines. Three
 ```bash
 cargo run -p identicon-api
 curl -i http://localhost:3000/
-curl -i http://localhost:3000/alice
-curl http://localhost:3000/alice?size=128&theme=nord&animated=true
-curl http://localhost:3000/alice?engine=crest&theme=nord
+curl -i http://localhost:3000/v1/alice
+curl http://localhost:3000/v1/alice?size=128&theme=nord&animated=true
+curl http://localhost:3000/v1/alice?engine=crest&theme=nord
 ```
 
 ### Container
@@ -34,7 +34,12 @@ Environment:
 - `PORT` — listen port (default `3000`)
 - `RUST_LOG` — tracing filter (default `identicon_api=info,tower_http=info`)
 
-Observability:
+API:
+
+- `GET /v1/{input}` — SVG identicon (`?size`, `?theme`, `?engine`, `?background`, `?animated`)
+- `GET /` — HTML gallery comparing engines and themes
+
+Observability (unversioned):
 
 - `GET /health` — `{"status":"ok"}`
 - `GET /metrics` — Prometheus text (`identicon_requests_total`, `identicon_render_duration_seconds`, `identicon_svg_size_bytes`)
