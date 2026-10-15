@@ -38,6 +38,8 @@ API:
 
 - `GET /v1/{input}` — SVG identicon (`?size`, `?theme`, `?engine`, `?background`, `?animated`)
 - `GET /` — HTML gallery comparing engines and themes
+- `GET /api-docs/openapi.json` — OpenAPI 3 schema ([utoipa](https://docs.rs/utoipa))
+- `GET /swagger-ui/` — interactive Swagger UI for the schema
 
 Observability (unversioned):
 

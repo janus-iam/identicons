@@ -94,6 +94,8 @@ pub fn route_label(path: &str) -> &'static str {
         "/" => "/",
         "/health" => "/health",
         "/metrics" => "/metrics",
+        "/api-docs/openapi.json" => "/api-docs/openapi.json",
+        _ if path.starts_with("/swagger-ui") => "/swagger-ui",
         _ if path.starts_with("/v1/") => "/v1/{input}",
         _ => "other",
     }
