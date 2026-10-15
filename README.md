@@ -89,10 +89,9 @@ import init, { render_identicon } from "identicon-wasm";
 
 Use the unified [Release](.github/workflows/release.yml) workflow (Actions → **Release** → **Run workflow**). Pass a semver **without** the leading `v` (e.g. `0.1.12`). It will:
 
-1. Create and push git tag `v{version}` if missing
-2. Publish `@janus-iam/identicon-wasm@{version}` to npm ([wasm-package.yml](.github/workflows/wasm-package.yml), OIDC trusted publishing — no `NPM_TOKEN`)
-3. Build and push the Docker image with tags `{version}`, major/minor, `latest`, and sha ([docker.yml](.github/workflows/docker.yml))
-4. Optionally create a GitHub Release
+1. Publish `@janus-iam/identicon-wasm@{version}` to npm ([wasm-package.yml](.github/workflows/wasm-package.yml), OIDC trusted publishing — no `NPM_TOKEN`)
+2. Build and push the Docker image with tags `{version}`, major/minor, `latest`, and sha ([docker.yml](.github/workflows/docker.yml))
+3. Optionally create a GitHub Release
 
 ```bash
 gh workflow run Release.yml --ref main -f version=0.1.12 -f create_github_release=true
