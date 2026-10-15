@@ -98,7 +98,7 @@ Use the unified [Release](.github/workflows/release.yml) workflow (Actions → *
 gh workflow run Release.yml --ref main -f version=0.1.12 -f create_github_release=true
 ```
 
-Pushing a `v*` tag still triggers the same Release workflow. You can also run **WASM package** or **Docker** alone with a `version` input for a partial republish.
+You can also run **WASM package** or **Docker** alone with a `version` input for a partial republish.
 
 **If npm publish returns 404**, check npm **Trusted publishing** for `@janus-iam/identicon-wasm`:
 

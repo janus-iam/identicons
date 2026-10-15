@@ -11,15 +11,13 @@ on:
                 description: Create a GitHub Release for v{version} after publish succeeds
                 type: boolean
                 default: true
-    push:
-        tags: ["v*"]
 
 permissions:
     contents: write
     id-token: write
 
 concurrency:
-    group: release-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+    group: release-${{ inputs.version }}
     cancel-in-progress: false
 
 jobs:
@@ -32,15 +30,8 @@ jobs:
             - name: Resolve version
               id: resolve
               env:
-                  EVENT_NAME: ${{ github.event_name }}
-                  INPUT_VERSION: ${{ inputs.version }}
-                  REF_NAME: ${{ github.ref_name }}
+                  VERSION: ${{ inputs.version }}
               run: |
-                  if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-                    VERSION="$INPUT_VERSION"
-                  else
-                    VERSION="${REF_NAME#v}"
-                  fi
                   if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
                     echo "::error::Invalid version '$VERSION' (expected semver without leading v, e.g. 0.1.12)"
                     exit 1
@@ -51,7 +42,6 @@ jobs:
 
     tag:
         needs: version
-        if: github.event_name == 'workflow_dispatch'
         runs-on: ubuntu-latest
         permissions:
             contents: write
@@ -77,10 +67,6 @@ jobs:
 
     wasm:
         needs: [version, tag]
-        if: >-
-            always()
-            && needs.version.result == 'success'
-            && (needs.tag.result == 'success' || needs.tag.result == 'skipped')
         permissions:
             contents: read
             id-token: write
@@ -90,10 +76,6 @@ jobs:
 
     docker:
         needs: [version, tag]
-        if: >-
-            always()
-            && needs.version.result == 'success'
-            && (needs.tag.result == 'success' || needs.tag.result == 'skipped')
         permissions:
             contents: read
         uses: ./.github/workflows/docker.yml
@@ -104,8 +86,7 @@ jobs:
     github-release:
         needs: [version, tag, wasm, docker]
         if: >-
-            github.event_name == 'workflow_dispatch'
-            && inputs.create_github_release
+            inputs.create_github_release
             && needs.wasm.result == 'success'
             && needs.docker.result == 'success'
         runs-on: ubuntu-latest
