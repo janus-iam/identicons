@@ -21,11 +21,11 @@ curl http://localhost:3000/v1/alice?engine=crest&theme=nord
 ### Container
 
 ```bash
-podman build -t janus-identicon-api .
+podman build -t janus-identicon-api -f crates/identicon-api/Containerfile .
 podman run --rm -p 3000:3000 janus-identicon-api
 ```
 
-The [Containerfile](Containerfile) uses a multi-stage build and a distroless non-root runtime image.
+The [Containerfile](crates/identicon-api/Containerfile) uses a multi-stage build and a distroless non-root runtime image.
 
 Responses are `image/svg+xml` with `Cache-Control: public, immutable, max-age=31536000`.
 

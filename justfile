@@ -6,7 +6,7 @@ version := "0.2.2"
 
 # Build and run the API container with Podman.
 container:
-    podman build -t {{image}} -f Containerfile .
+    podman build -t {{image}} -f crates/identicon-api/Containerfile .
     podman run --rm -p {{port}}:3000 {{image}}
 
 # Build the WASM npm package (wasm-pack via Bun; matches CI bundler target).
