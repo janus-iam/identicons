@@ -18,7 +18,11 @@ RUN mkdir -p crates/identicon-core/src crates/identicon-api/src crates/identicon
 
 COPY crates ./crates
 
-RUN cargo build --release -p identicon-api \
+# Force a real rebuild: after replacing stub sources, cargo can keep the empty
+# `fn main() {}` artifact if mtimes/fingerprints look unchanged.
+RUN find crates -name '*.rs' -exec touch {} + \
+    && cargo build --release -p identicon-api \
+    && test "$(wc -c < /build/target/release/identicon-api)" -gt 1000000 \
     && strip /build/target/release/identicon-api
 
 FROM gcr.io/distroless/cc-debian12:nonroot AS runtime

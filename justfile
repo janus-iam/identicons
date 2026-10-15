@@ -2,7 +2,7 @@ image := "janus-identicon-api"
 port := "3000"
 wasm_crate := "crates/identicon-wasm"
 wasm_pkg_dir := wasm_crate + "/pkg"
-version := "0.2.1"
+version := "0.2.2"
 
 # Build and run the API container with Podman.
 container:
