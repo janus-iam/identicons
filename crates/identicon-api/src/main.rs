@@ -17,20 +17,57 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::Level;
+use utoipa::{OpenApi, ToSchema};
+use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(Clone)]
 struct AppState {
     metrics: Arc<Metrics>,
 }
 
-#[derive(Debug, Default, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, ToSchema)]
+struct HealthStatus {
+    status: String,
+}
+
+#[derive(Debug, Default, serde::Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 struct IdenticonQuery {
+    /// Output size in pixels. Defaults to 256.
+    #[param(minimum = 1, example = 128)]
     size: Option<u32>,
+    /// Color theme. When omitted, derived from the input.
+    /// Valid: aurora, sunset, synthwave, nord, monochrome, oceanic, neon, pastel, ciel, terre, mer, feu.
+    #[param(example = "nord")]
     theme: Option<String>,
+    /// Include the background fill. Defaults to true.
+    #[param(example = true)]
     background: Option<bool>,
+    /// Enable subtle SVG animation. Defaults to false.
+    #[param(example = false)]
     animated: Option<bool>,
+    /// Shape engine. Defaults to `ribbon`.
+    /// Valid: blob, crest, voronoi, kaleido, ribbon, constellation, monogram.
+    #[param(example = "ribbon")]
     engine: Option<String>,
 }
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "Janus Identicons API",
+        description = "Deterministic SVG identicons from any string.",
+        version = env!("CARGO_PKG_VERSION")
+    ),
+    paths(gallery_handler, health_handler, metrics_handler, identicon_handler),
+    components(schemas(HealthStatus)),
+    tags(
+        (name = "gallery", description = "HTML comparison gallery"),
+        (name = "identicons", description = "SVG identicon generation"),
+        (name = "ops", description = "Health and metrics")
+    )
+)]
+struct ApiDoc;
 
 const GALLERY_PEOPLE: [&str; 5] = ["alice", "bob", "carol", "diego", "emma"];
 
@@ -71,6 +108,15 @@ img{width:104px;height:104px;border-radius:14px;display:block;background:#1c1f27
     html
 }
 
+/// HTML gallery comparing every engine and theme.
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "gallery",
+    responses(
+        (status = 200, description = "Comparison gallery HTML", content_type = "text/html")
+    )
+)]
 async fn gallery_handler() -> impl IntoResponse {
     (
         StatusCode::OK,
@@ -85,10 +131,34 @@ async fn gallery_handler() -> impl IntoResponse {
     )
 }
 
-async fn health_handler() -> impl IntoResponse {
-    axum::Json(serde_json::json!({ "status": "ok" }))
+/// Liveness probe.
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "ops",
+    responses(
+        (status = 200, description = "Service is healthy", body = HealthStatus)
+    )
+)]
+async fn health_handler() -> axum::Json<HealthStatus> {
+    axum::Json(HealthStatus {
+        status: "ok".to_string(),
+    })
 }
 
+/// Prometheus metrics scrape endpoint.
+#[utoipa::path(
+    get,
+    path = "/metrics",
+    tag = "ops",
+    responses(
+        (
+            status = 200,
+            description = "Prometheus text exposition format",
+            content_type = "text/plain; version=0.0.4; charset=utf-8"
+        )
+    )
+)]
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     (
         StatusCode::OK,
@@ -100,6 +170,31 @@ async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
+/// Render a deterministic SVG identicon for `{input}`.
+///
+/// Input rules: non-empty, max 256 characters, ASCII letters/digits and `-_.@`.
+#[utoipa::path(
+    get,
+    path = "/v1/{input}",
+    tag = "identicons",
+    params(
+        ("input" = String, Path, description = "Seed string used to derive the identicon", example = "alice"),
+        IdenticonQuery
+    ),
+    responses(
+        (
+            status = 200,
+            description = "Rendered SVG identicon",
+            content_type = "image/svg+xml",
+            body = String
+        ),
+        (
+            status = 400,
+            description = "Invalid input, unknown theme, or unknown engine",
+            body = String
+        )
+    )
+)]
 async fn identicon_handler(
     State(state): State<AppState>,
     Path(input): Path<String>,
@@ -238,6 +333,10 @@ fn app(state: AppState) -> Router {
         .route("/health", get(health_handler))
         .route("/metrics", get(metrics_handler))
         .nest("/v1", v1)
+        .merge(
+            SwaggerUi::new("/swagger-ui")
+                .url("/api-docs/openapi.json", ApiDoc::openapi()),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             track_requests,
@@ -288,6 +387,49 @@ mod tests {
         app(AppState {
             metrics: Arc::new(Metrics::new()),
         })
+    }
+
+    #[tokio::test]
+    async fn openapi_json_is_served() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/api-docs/openapi.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["openapi"], "3.1.0");
+        assert_eq!(json["info"]["title"], "Janus Identicons API");
+        assert!(json["paths"]["/v1/{input}"]["get"].is_object());
+        assert!(json["paths"]["/health"]["get"].is_object());
+    }
+
+    #[tokio::test]
+    async fn swagger_ui_is_served() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/swagger-ui/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(html.contains("Swagger UI") || html.contains("swagger-ui"));
     }
 
     #[tokio::test]
