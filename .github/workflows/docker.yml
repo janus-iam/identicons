@@ -1,13 +1,21 @@
 name: Docker
 
 on:
-    push:
-        tags: ["v*"]
+    workflow_call:
+        inputs:
+            version:
+                description: Semver without leading v (e.g. 0.1.12)
+                required: true
+                type: string
     workflow_dispatch:
+        inputs:
+            version:
+                description: Semver without leading v (e.g. 0.1.12)
+                required: true
+                type: string
 
 concurrency:
-    # Same commit pushed as branch + tag triggers one run (cancels the other).
-    group: docker-${{ github.sha }}
+    group: docker-${{ inputs.version }}
     cancel-in-progress: true
 
 env:
@@ -19,6 +27,15 @@ jobs:
         permissions:
             contents: read
         steps:
+            - name: Validate version
+              env:
+                  VERSION: ${{ inputs.version }}
+              run: |
+                  if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+                    echo "::error::Invalid version '$VERSION' (expected semver without leading v, e.g. 0.1.12)"
+                    exit 1
+                  fi
+
             - name: Checkout
               uses: actions/checkout@v7
 
@@ -40,11 +57,10 @@ jobs:
               with:
                   images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
                   tags: |
-                      type=raw,value=latest,enable={{is_default_branch}}
-                      type=ref,event=branch
-                      type=semver,pattern={{version}}
-                      type=semver,pattern={{major}}.{{minor}}
-                      type=semver,pattern={{major}}
+                      type=raw,value=latest
+                      type=raw,value=${{ inputs.version }}
+                      type=semver,pattern={{major}}.{{minor}},value=v${{ inputs.version }}
+                      type=semver,pattern={{major}},value=v${{ inputs.version }}
                       type=sha,prefix=
 
             - name: Build and push

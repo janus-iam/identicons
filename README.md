@@ -85,19 +85,26 @@ bun add identicon-wasm
 import init, { render_identicon } from "identicon-wasm";
 ```
 
-Releases are built with `wasm-pack` and published with **Bun** from the generated `pkg/` tree ([.github/workflows/wasm-package.yml](.github/workflows/wasm-package.yml)) when you push a `v*` tag (e.g. `v0.1.0`) or run the workflow manually. Publishing uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC) — no `NPM_TOKEN`.
+### Releases
+
+Use the unified [Release](.github/workflows/release.yml) workflow (Actions → **Release** → **Run workflow**). Pass a semver **without** the leading `v` (e.g. `0.1.12`). It will:
+
+1. Publish `@janus-iam/identicon-wasm@{version}` to npm ([wasm-package.yml](.github/workflows/wasm-package.yml), OIDC trusted publishing — no `NPM_TOKEN`)
+2. Build and push the Docker image with tags `{version}`, major/minor, `latest`, and sha ([docker.yml](.github/workflows/docker.yml))
+3. Optionally create a GitHub Release
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+gh workflow run Release.yml --ref main -f version=0.1.12 -f create_github_release=true
 ```
 
-**If publish returns 404**, check npm **Trusted publishing** for `@janus-iam/identicon-wasm`:
+You can also run **WASM package** or **Docker** alone with a `version` input for a partial republish.
+
+**If npm publish returns 404**, check npm **Trusted publishing** for `@janus-iam/identicon-wasm`:
 
 | npm field | Must be |
 |-----------|---------|
 | Repository | `janus-iam/janus-identicons` |
-| Workflow filename | `wasm-package.yml` (not the workflow display name) |
+| Workflow filename | `wasm-package.yml` (not the workflow display name; must stay this file even when called from Release) |
 | Environment | empty, unless you add `environment: …` to the `publish` job in the workflow |
 
 Local `npm publish` still needs `npm login` and membership in the `@janus-iam` org (404 locally usually means no scope access, not missing OIDC).
