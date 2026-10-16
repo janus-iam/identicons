@@ -30,7 +30,7 @@ pub enum Engine {
     Constellation,
     /// Initials over a generative motif.
     Monogram,
-    /// Layered character: silhouette, expression, hat, glasses, neck accessory, badge.
+    /// Layered character: one shared face, hat, glasses, neck accessory, scenic background.
     Character,
 }
 

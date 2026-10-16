@@ -1,31 +1,21 @@
 //! Layered character identicon.
 //!
-//! A hash picks each macroscopic trait independently: silhouette, expression,
-//! hat, glasses, neck accessory and badge background. The same string always
-//! rebuilds the same character. Geometry is original SVG (circles, rounded
-//! rects and a handful of cubic paths) — no filters, no images.
+//! Every character shares one face: the same round head, the same eyes and
+//! the same smile. A hash only changes the outfit (hat, glasses, neck
+//! accessory) and the setting behind them. Geometry is original SVG — no
+//! filters, no images.
 
-use super::common::{Ctx, polygon_d, regular_polygon, smooth_closed_d, star_polygon};
+use super::common::{Ctx, polygon_d, star_polygon};
 use crate::bezier::write_f32;
 use crate::prng::Prng;
-use std::f32::consts::{FRAC_PI_2, FRAC_PI_3, TAU};
+use std::f32::consts::FRAC_PI_2;
 
 const INK: &str = "#1c1917";
 const PAPER: &str = "#f6f1e7";
 const BLUSH: &str = "#ff6d8a";
+/// One light face colour so the eyes stay the same ink on every character.
+const FACE: &str = "#8fd0ef";
 const LENS: &str = "#121820";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Shape {
-    Round,
-    Organic,
-    Capsule,
-    Boxy,
-    Droplet,
-    Cloud,
-    Hex,
-    Pear,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Hat {
@@ -64,24 +54,14 @@ enum Neck {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Backdrop {
-    Disc,
-    Squircle,
-    Square,
-    Split,
-    Stripes,
-    Dots,
-    Rings,
-    Grid,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Mood {
-    Idle,
-    Happy,
-    Sleepy,
-    Wow,
-    Wink,
-    Love,
+    Sky,
+    Mountain,
+    Sea,
+    Forest,
+    Sunset,
+    Beach,
+    Night,
+    Snow,
 }
 
 struct Metrics {
@@ -94,21 +74,11 @@ struct Metrics {
 }
 
 struct Spec {
-    shape: Shape,
     hat: Hat,
     glasses: Glasses,
     neck: Neck,
     bg: Option<Backdrop>,
-    mood: Mood,
     flip: u8,
-    gaze_x: f32,
-    gaze_y: f32,
-    eye_scale: f32,
-    mouth_scale: f32,
-    tilt: f32,
-    organic: [f32; 10],
-    blush: bool,
-    freckles: bool,
 }
 
 struct Face {
@@ -124,46 +94,14 @@ struct Face {
 
 struct Colors {
     body: &'static str,
-    field: &'static str,
     accent: &'static str,
     jewel: &'static str,
     fg: &'static str,
-    light: bool,
 }
 
 struct Path {
     d: String,
     k: f32,
-}
-
-impl Shape {
-    const ALL: [Shape; 8] = [
-        Shape::Round,
-        Shape::Organic,
-        Shape::Capsule,
-        Shape::Boxy,
-        Shape::Droplet,
-        Shape::Cloud,
-        Shape::Hex,
-        Shape::Pear,
-    ];
-
-    fn from_u8(v: u8) -> Self {
-        Self::ALL[(v % 8) as usize]
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Shape::Round => "round",
-            Shape::Organic => "organic",
-            Shape::Capsule => "capsule",
-            Shape::Boxy => "boxy",
-            Shape::Droplet => "droplet",
-            Shape::Cloud => "cloud",
-            Shape::Hex => "hex",
-            Shape::Pear => "pear",
-        }
-    }
 }
 
 impl Hat {
@@ -256,14 +194,14 @@ impl Neck {
 
 impl Backdrop {
     const ALL: [Backdrop; 8] = [
-        Backdrop::Disc,
-        Backdrop::Squircle,
-        Backdrop::Square,
-        Backdrop::Split,
-        Backdrop::Stripes,
-        Backdrop::Dots,
-        Backdrop::Rings,
-        Backdrop::Grid,
+        Backdrop::Sky,
+        Backdrop::Mountain,
+        Backdrop::Sea,
+        Backdrop::Forest,
+        Backdrop::Sunset,
+        Backdrop::Beach,
+        Backdrop::Night,
+        Backdrop::Snow,
     ];
 
     fn from_u8(v: u8) -> Self {
@@ -272,40 +210,14 @@ impl Backdrop {
 
     fn name(self) -> &'static str {
         match self {
-            Backdrop::Disc => "disc",
-            Backdrop::Squircle => "squircle",
-            Backdrop::Square => "square",
-            Backdrop::Split => "split",
-            Backdrop::Stripes => "stripes",
-            Backdrop::Dots => "dots",
-            Backdrop::Rings => "rings",
-            Backdrop::Grid => "grid",
-        }
-    }
-}
-
-impl Mood {
-    const ALL: [Mood; 6] = [
-        Mood::Idle,
-        Mood::Happy,
-        Mood::Sleepy,
-        Mood::Wow,
-        Mood::Wink,
-        Mood::Love,
-    ];
-
-    fn from_u8(v: u8) -> Self {
-        Self::ALL[(v % 6) as usize]
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Mood::Idle => "idle",
-            Mood::Happy => "happy",
-            Mood::Sleepy => "sleepy",
-            Mood::Wow => "wow",
-            Mood::Wink => "wink",
-            Mood::Love => "love",
+            Backdrop::Sky => "sky",
+            Backdrop::Mountain => "mountain",
+            Backdrop::Sea => "sea",
+            Backdrop::Forest => "forest",
+            Backdrop::Sunset => "sunset",
+            Backdrop::Beach => "beach",
+            Backdrop::Night => "night",
+            Backdrop::Snow => "snow",
         }
     }
 }
@@ -313,21 +225,11 @@ impl Mood {
 impl Spec {
     fn from_hash(hash: &[u8; 32], background: bool) -> Self {
         Self {
-            shape: Shape::from_u8(hash[0]),
             hat: Hat::from_u8(hash[1]),
             glasses: Glasses::from_u8(hash[2]),
             neck: Neck::from_u8(hash[3]),
             bg: background.then(|| Backdrop::from_u8(hash[4])),
-            mood: Mood::from_u8(hash[5]),
             flip: hash[8],
-            gaze_x: (hash[9] as f32 / 255.0 - 0.5) * 2.2,
-            gaze_y: (hash[10] as f32 / 255.0 - 0.5) * 1.6,
-            eye_scale: 0.9 + (hash[23] % 6) as f32 * 0.035,
-            mouth_scale: 0.88 + (hash[24] % 5) as f32 * 0.06,
-            tilt: (hash[25] as f32 / 255.0 - 0.5) * 7.0,
-            organic: std::array::from_fn(|i| (hash[13 + i] % 16) as f32 / 15.0),
-            blush: hash[11] % 6 != 0,
-            freckles: hash[11] % 5 == 0,
         }
     }
 
@@ -342,146 +244,42 @@ impl Spec {
     fn pendant(&self) -> u8 {
         (self.flip >> 2) % 3
     }
-
-    fn wink_left(&self) -> bool {
-        self.flip & 8 == 0
-    }
-
-    fn split_turns(&self) -> f32 {
-        match (self.flip >> 4) % 4 {
-            0 => 0.0,
-            1 => 90.0,
-            2 => 180.0,
-            _ => 38.0,
-        }
-    }
 }
 
-fn metrics(shape: Shape) -> Metrics {
-    match shape {
-        Shape::Round => Metrics {
-            crown: 30.0,
-            neck: 78.0,
-            half: 17.5,
-            eye_y: 50.0,
-            mouth_y: 64.0,
-            eye_dx: 11.4,
-        },
-        Shape::Organic => Metrics {
-            crown: 32.0,
-            neck: 78.0,
-            half: 16.5,
-            eye_y: 51.0,
-            mouth_y: 64.5,
-            eye_dx: 11.0,
-        },
-        Shape::Capsule => Metrics {
-            crown: 28.0,
-            neck: 80.0,
-            half: 14.5,
-            eye_y: 50.0,
-            mouth_y: 65.0,
-            eye_dx: 10.2,
-        },
-        Shape::Boxy => Metrics {
-            crown: 32.0,
-            neck: 78.0,
-            half: 22.0,
-            eye_y: 52.0,
-            mouth_y: 66.0,
-            eye_dx: 13.0,
-        },
-        Shape::Droplet => Metrics {
-            crown: 30.0,
-            neck: 68.0,
-            half: 18.0,
-            eye_y: 44.0,
-            mouth_y: 56.0,
-            eye_dx: 12.0,
-        },
-        Shape::Cloud => Metrics {
-            crown: 36.0,
-            neck: 74.0,
-            half: 15.0,
-            eye_y: 54.0,
-            mouth_y: 66.0,
-            eye_dx: 10.2,
-        },
-        Shape::Hex => Metrics {
-            crown: 34.0,
-            neck: 78.0,
-            half: 16.0,
-            eye_y: 54.0,
-            mouth_y: 67.0,
-            eye_dx: 11.2,
-        },
-        Shape::Pear => Metrics {
-            crown: 36.0,
-            neck: 76.0,
-            half: 10.5,
-            eye_y: 56.0,
-            mouth_y: 67.0,
-            eye_dx: 8.4,
-        },
-    }
-}
+/// One round head. The crown sits just under the top of the circle so a
+/// band of scenery stays visible above the hat.
+const FACE_METRICS: Metrics = Metrics {
+    crown: 33.0,
+    neck: 78.0,
+    half: 16.0,
+    eye_y: 52.0,
+    mouth_y: 66.0,
+    eye_dx: 11.2,
+};
 
-fn face_of(spec: &Spec, m: &Metrics) -> Face {
+fn face_of(m: &Metrics) -> Face {
     let lens = (m.eye_dx - 2.4).clamp(6.2, 8.6);
     Face {
-        lx: 50.0 + spec.gaze_x - m.eye_dx,
-        rx: 50.0 + spec.gaze_x + m.eye_dx,
-        ey: m.eye_y + spec.gaze_y,
-        mx: 50.0 + spec.gaze_x * 0.45,
-        my: m.mouth_y + spec.gaze_y * 0.35,
-        ex: 4.5 * spec.eye_scale,
-        ey_r: 6.4 * spec.eye_scale,
+        lx: 50.0 - m.eye_dx,
+        rx: 50.0 + m.eye_dx,
+        ey: m.eye_y,
+        mx: 50.0,
+        my: m.mouth_y,
+        ex: 4.5,
+        ey_r: 6.4,
         lens,
     }
 }
 
 fn colors(ctx: &Ctx<'_>) -> Colors {
     let seed = u32::from(ctx.hash[6]) | (u32::from(ctx.hash[7]) << 8);
-    let [body_i, field_i, accent_i] = Ctx::distinct3(seed);
-    let jewel_i = (0..5)
-        .find(|i| *i != body_i && *i != field_i && *i != accent_i)
-        .unwrap_or(0);
-    let body = ctx.color(body_i);
-    let light = luminance(body) >= 0.42;
+    let [_skip, accent_i, jewel_i] = Ctx::distinct3(seed);
     Colors {
-        body,
-        field: ctx.color(field_i),
+        body: FACE,
         accent: ctx.color(accent_i),
         jewel: ctx.color(jewel_i),
-        fg: if light { INK } else { PAPER },
-        light,
+        fg: INK,
     }
-}
-
-fn luminance(hex: &str) -> f32 {
-    let b = hex.as_bytes();
-    if b.len() != 7 || b[0] != b'#' {
-        return 0.5;
-    }
-    let val = |i: usize| -> f32 {
-        let h = |c: u8| -> u8 {
-            match c {
-                b'0'..=b'9' => c - b'0',
-                b'a'..=b'f' => c - b'a' + 10,
-                b'A'..=b'F' => c - b'A' + 10,
-                _ => 0,
-            }
-        };
-        f32::from(h(b[i]) * 16 + h(b[i + 1])) / 255.0
-    };
-    let lin = |c: f32| -> f32 {
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    0.2126 * lin(val(1)) + 0.7152 * lin(val(3)) + 0.0722 * lin(val(5))
 }
 
 impl Path {
@@ -547,70 +345,58 @@ pub fn render(ctx: &mut Ctx<'_>, _prng: &mut Prng) {
 fn paint(ctx: &mut Ctx<'_>, spec: &Spec) {
     let k = ctx.size / 100.0;
     let cols = colors(ctx);
-    let m = metrics(spec.shape);
-    let face = face_of(spec, &m);
+    let m = FACE_METRICS;
+    let face = face_of(&m);
     let clip = ctx.id("body");
-    let badge = ctx.id("badge");
     let sheen = ctx.id("sheen");
 
     ctx.begin();
     {
         let out = ctx.out();
         out.push_str(&format!(r#"<clipPath id="{clip}">"#));
-        write_shape(out, spec, k, "");
+        write_head(out, k, "");
         out.push_str("</clipPath>");
-        if let Some(bg) = spec.bg {
-            out.push_str(&format!(r#"<clipPath id="{badge}">"#));
-            write_badge(out, bg, k, "");
-            out.push_str("</clipPath>");
-        }
         out.push_str(&format!(
             r##"<radialGradient id="{sheen}" cx="0.35" cy="0.28" r="0.8"><stop offset="0" stop-color="#ffffff" stop-opacity="0.5"/><stop offset="0.48" stop-color="#ffffff" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.22"/></radialGradient>"##
         ));
     }
     ctx.close_defs();
 
-    let bob = n(ctx.size * 0.014);
-    let dur = format_dur(2.7 + f32::from(ctx.hash[26] % 14) * 0.15);
     ctx.out().push_str(&format!(
-        r#"<g data-shape="{}" data-hat="{}" data-glasses="{}" data-neck="{}" data-bg="{}" data-mood="{}">"#,
-        spec.shape.name(),
+        r#"<g data-shape="round" data-hat="{}" data-glasses="{}" data-neck="{}" data-bg="{}" data-mood="smile">"#,
         spec.hat.name(),
         spec.glasses.name(),
         spec.neck.name(),
         spec.bg.map(Backdrop::name).unwrap_or("none"),
-        spec.mood.name()
     ));
+
+    if let Some(bg) = spec.bg {
+        draw_scene(ctx, k, bg);
+    }
+
+    let bob = n(ctx.size * 0.014);
+    let dur = format_dur(2.7 + f32::from(ctx.hash[26] % 14) * 0.15);
+    ctx.out().push_str("<g>");
     if ctx.animated {
         ctx.out().push_str(&format!(
             r#"<animateTransform attributeName="transform" type="translate" values="0 0;0 -{bob};0 0" dur="{dur}s" repeatCount="indefinite"/>"#
         ));
     }
 
-    if let Some(bg) = spec.bg {
-        draw_badge(ctx, spec, k, bg, &cols, &badge, &sheen);
-    }
-
     ctx.out().push_str(&format!(
-        r#"<g transform="rotate({} {} {})">"#,
-        n(spec.tilt),
+        r##"<ellipse cx="{}" cy="{}" rx="{}" ry="{}" fill="#000" fill-opacity="0.16"/>"##,
         n(50.0 * k),
-        n(56.0 * k)
+        n(88.0 * k),
+        n(16.0 * k),
+        n(3.2 * k)
     ));
-
-    ctx.out().push_str(&format!(
-        r##"<g transform="translate(0 {})" fill="#000" fill-opacity="0.16">"##,
-        n(k * 1.8)
-    ));
-    write_shape(ctx.out(), spec, k, "");
-    ctx.out().push_str("</g>");
 
     let body_attrs = format!(
         r##"fill="{}" stroke="#000000" stroke-opacity="0.16" stroke-width="{}""##,
         cols.body,
         n(k * 1.15)
     );
-    write_shape(ctx.out(), spec, k, &body_attrs);
+    write_head(ctx.out(), k, &body_attrs);
 
     let side = n(ctx.size);
     ctx.out()
@@ -618,7 +404,7 @@ fn paint(ctx: &mut Ctx<'_>, spec: &Spec) {
     ctx.out().push_str(&format!(
         r#"<rect x="0" y="0" width="{side}" height="{side}" fill="url(#{sheen})"/>"#
     ));
-    draw_face(ctx, spec, k, &cols, &face);
+    draw_face(ctx, k, &face);
     ctx.out().push_str("</g>");
 
     draw_neck(ctx, spec, k, &m, &cols);
@@ -633,315 +419,269 @@ fn format_dur(v: f32) -> String {
     format!("{}.{}", tenths / 10, tenths.abs() % 10)
 }
 
-fn write_shape(out: &mut String, spec: &Spec, k: f32, extra: &str) {
-    match spec.shape {
-        Shape::Round => {
-            out.push_str(&format!(
-                r#"<circle cx="{}" cy="{}" r="{}" {extra}/>"#,
-                n(50.0 * k),
-                n(56.0 * k),
-                n(30.0 * k)
-            ));
-        }
-        Shape::Capsule => {
-            out.push_str(&format!(
-                r#"<rect x="{}" y="{}" width="{}" height="{}" rx="{}" {extra}/>"#,
-                n(33.0 * k),
-                n(22.0 * k),
-                n(34.0 * k),
-                n(66.0 * k),
-                n(17.0 * k)
-            ));
-        }
-        Shape::Boxy => {
-            out.push_str(&format!(
-                r#"<rect x="{}" y="{}" width="{}" height="{}" rx="{}" {extra}/>"#,
-                n(20.0 * k),
-                n(26.0 * k),
-                n(60.0 * k),
-                n(60.0 * k),
-                n(16.0 * k)
-            ));
-        }
-        Shape::Hex => {
-            let pts = regular_polygon(50.0 * k, 58.0 * k, 33.0 * k, 6, -FRAC_PI_3);
-            let mut d = String::with_capacity(96);
-            polygon_d(&mut d, &pts);
-            out.push_str(&format!(r#"<path d="{d}" {extra}/>"#));
-        }
-        Shape::Organic => {
-            // Soft pebble: a top tuft plus a small hash wobble. Enough points
-            // that the outline stays round instead of turning into a star.
-            let pts: Vec<(f32, f32)> = (0..10)
-                .map(|i| {
-                    let ang = -FRAC_PI_2 + TAU * (i as f32) / 10.0;
-                    let tuft = (ang + FRAC_PI_2).cos().max(0.0).powi(2) * 8.0;
-                    let r = 25.5 + (spec.organic[i] - 0.5) * 7.0 + tuft;
-                    ((50.0 + ang.cos() * r) * k, (56.0 + ang.sin() * r) * k)
-                })
-                .collect();
-            let mut d = String::with_capacity(220);
-            smooth_closed_d(&mut d, &pts);
-            out.push_str(&format!(r#"<path d="{d}" {extra}/>"#));
-        }
-        Shape::Droplet => {
-            out.push_str(&format!(r#"<path d="{}" {extra}/>"#, droplet_d(k)));
-        }
-        Shape::Cloud => {
-            out.push_str(&format!(r#"<path d="{}" {extra}/>"#, cloud_d(k)));
-        }
-        Shape::Pear => {
-            out.push_str(&format!(r#"<path d="{}" {extra}/>"#, pear_d(k)));
-        }
-    }
+fn write_head(out: &mut String, k: f32, extra: &str) {
+    out.push_str(&format!(
+        r#"<circle cx="{}" cy="{}" r="{}" {extra}/>"#,
+        n(50.0 * k),
+        n(58.0 * k),
+        n(27.0 * k)
+    ));
 }
 
-fn droplet_d(k: f32) -> String {
-    let mut p = Path::new(k);
-    p.m(22.0, 42.0);
-    p.c(20.0, 30.0, 34.0, 24.0, 50.0, 24.0);
-    p.c(66.0, 24.0, 80.0, 30.0, 78.0, 42.0);
-    p.c(80.0, 58.0, 68.0, 72.0, 50.0, 90.0);
-    p.c(32.0, 72.0, 20.0, 58.0, 22.0, 42.0);
-    p.z();
-    p.d
-}
-
-fn pear_d(k: f32) -> String {
-    let mut p = Path::new(k);
-    p.m(50.0, 30.0);
-    p.c(43.0, 30.0, 39.0, 36.0, 38.0, 44.0);
-    p.c(36.0, 56.0, 28.0, 64.0, 30.0, 76.0);
-    p.c(32.0, 90.0, 40.0, 92.0, 50.0, 92.0);
-    p.c(60.0, 92.0, 68.0, 90.0, 70.0, 76.0);
-    p.c(72.0, 64.0, 64.0, 56.0, 62.0, 44.0);
-    p.c(61.0, 36.0, 57.0, 30.0, 50.0, 30.0);
-    p.z();
-    p.d
-}
-
-fn cloud_d(k: f32) -> String {
-    let mut p = Path::new(k);
-    p.m(30.0, 62.0);
-    p.c(14.0, 62.0, 12.0, 48.0, 26.0, 44.0);
-    p.c(22.0, 32.0, 34.0, 28.0, 42.0, 40.0);
-    p.c(44.0, 24.0, 58.0, 24.0, 62.0, 40.0);
-    p.c(70.0, 28.0, 86.0, 34.0, 80.0, 48.0);
-    p.c(94.0, 52.0, 88.0, 70.0, 72.0, 72.0);
-    p.c(64.0, 86.0, 34.0, 86.0, 28.0, 72.0);
-    p.c(18.0, 72.0, 16.0, 66.0, 30.0, 62.0);
-    p.z();
-    p.d
-}
-
-fn write_badge(out: &mut String, bg: Backdrop, k: f32, extra: &str) {
-    match bg {
-        Backdrop::Squircle => {
-            out.push_str(&format!(
-                r#"<rect x="{}" y="{}" width="{}" height="{}" rx="{}" {extra}/>"#,
-                n(5.0 * k),
-                n(5.0 * k),
-                n(90.0 * k),
-                n(90.0 * k),
-                n(28.0 * k)
-            ));
-        }
-        Backdrop::Square => {
-            out.push_str(&format!(
-                r#"<rect x="{}" y="{}" width="{}" height="{}" rx="{}" {extra}/>"#,
-                n(7.0 * k),
-                n(7.0 * k),
-                n(86.0 * k),
-                n(86.0 * k),
-                n(8.0 * k)
-            ));
-        }
-        _ => {
-            out.push_str(&format!(
-                r#"<circle cx="{}" cy="{}" r="{}" {extra}/>"#,
-                n(50.0 * k),
-                n(50.0 * k),
-                n(46.0 * k)
-            ));
-        }
-    }
-}
-
-fn draw_badge(
-    ctx: &mut Ctx<'_>,
-    spec: &Spec,
-    k: f32,
-    bg: Backdrop,
-    cols: &Colors,
-    clip: &str,
-    sheen: &str,
-) {
-    let fill = format!(r#"fill="{}""#, cols.field);
-    write_badge(ctx.out(), bg, k, &fill);
-    match bg {
-        Backdrop::Split => {
-            ctx.out().push_str(&format!(
-                r#"<g clip-path="url(#{clip})"><rect x="{}" y="{}" width="{}" height="{}" fill="{}" transform="rotate({} {} {})"/></g>"#,
-                n(-20.0 * k),
-                n(50.0 * k),
-                n(140.0 * k),
-                n(80.0 * k),
-                cols.jewel,
-                n(spec.split_turns()),
-                n(50.0 * k),
-                n(50.0 * k)
-            ));
-        }
-        Backdrop::Stripes => {
-            let angle = -28.0 + f32::from(spec.flip % 5) * 14.0;
-            ctx.out().push_str(&format!(
-                r#"<g clip-path="url(#{clip})" transform="rotate({} {} {})">"#,
-                n(angle),
-                n(50.0 * k),
-                n(50.0 * k)
-            ));
-            let mut i = -6;
-            while i <= 6 {
-                if i % 2 == 0 {
-                    ctx.out().push_str(&format!(
-                        r#"<rect x="{}" y="{}" width="{}" height="{}" fill="{}"/>"#,
-                        n((50.0 + i as f32 * 8.0 - 3.2) * k),
-                        n(-20.0 * k),
-                        n(6.4 * k),
-                        n(140.0 * k),
-                        cols.jewel
-                    ));
-                }
-                i += 1;
-            }
-            ctx.out().push_str("</g>");
-        }
-        Backdrop::Dots => {
-            ctx.out()
-                .push_str(&format!(r#"<g clip-path="url(#{clip})">"#));
-            let mut row = 0;
-            let mut y = 12.0;
-            while y <= 90.0 {
-                let mut x = 12.0 + if row % 2 == 0 { 0.0 } else { 6.0 };
-                while x <= 90.0 {
-                    ctx.write_circle(x * k, y * k, 2.15 * k, cols.jewel, 0.9);
-                    x += 12.0;
-                }
-                y += 12.0;
-                row += 1;
-            }
-            ctx.out().push_str("</g>");
-        }
-        Backdrop::Rings => {
-            for (i, r) in [34.0, 24.0, 14.0].into_iter().enumerate() {
-                let color = if i % 2 == 0 { cols.jewel } else { cols.accent };
-                ctx.write_ring(50.0 * k, 50.0 * k, r * k, color, 3.4 * k, 0.95);
-            }
-        }
-        Backdrop::Grid => {
-            ctx.out().push_str(&format!(
-                r#"<g clip-path="url(#{clip})" stroke="{}" stroke-width="{}" stroke-opacity="0.85">"#,
-                cols.jewel,
-                n(1.15 * k)
-            ));
-            let mut t = 14.0;
-            while t <= 86.0 {
-                ctx.out().push_str(&format!(
-                    r#"<line x1="{x}" y1="{y0}" x2="{x}" y2="{y1}"/><line x1="{y0}" y1="{x}" x2="{y1}" y2="{x}"/>"#,
-                    x = n(t * k),
-                    y0 = n(6.0 * k),
-                    y1 = n(94.0 * k)
-                ));
-                t += 12.0;
-            }
-            ctx.out().push_str("</g>");
-        }
-        Backdrop::Disc | Backdrop::Squircle | Backdrop::Square => {}
-    }
-    write_badge(
-        ctx.out(),
-        bg,
-        k,
-        &format!(
-            r##"fill="url(#{sheen})" stroke="#000000" stroke-opacity="0.12" stroke-width="{}""##,
-            n(k * 1.2)
-        ),
-    );
-}
-
-fn draw_face(ctx: &mut Ctx<'_>, spec: &Spec, k: f32, cols: &Colors, face: &Face) {
-    if spec.blush {
-        let op = if spec.mood == Mood::Love { 0.55 } else { 0.34 };
-        ctx.write_circle((face.lx - 6.2) * k, (face.ey + 8.0) * k, 3.7 * k, BLUSH, op);
-        ctx.write_circle((face.rx + 6.2) * k, (face.ey + 8.0) * k, 3.7 * k, BLUSH, op);
-    }
-    if spec.freckles {
-        for (cx, cy) in [
-            (face.lx - 7.4, face.ey + 6.4),
-            (face.lx - 4.6, face.ey + 8.6),
-            (face.lx - 8.2, face.ey + 9.6),
-            (face.rx + 7.4, face.ey + 6.4),
-            (face.rx + 4.6, face.ey + 8.6),
-            (face.rx + 8.2, face.ey + 9.6),
-        ] {
-            ctx.write_circle(cx * k, cy * k, 0.7 * k, cols.fg, 0.55);
-        }
-    }
-
-    match spec.mood {
-        Mood::Happy => {
-            eye_arc(ctx, k, face.lx, face.ey, 5.4 * spec.eye_scale, cols.fg);
-            eye_arc(ctx, k, face.rx, face.ey, 5.4 * spec.eye_scale, cols.fg);
-        }
-        Mood::Love => {
-            heart(ctx, k, face.lx, face.ey, 4.6 * spec.eye_scale, BLUSH);
-            heart(ctx, k, face.rx, face.ey, 4.6 * spec.eye_scale, BLUSH);
-        }
-        Mood::Wink => {
-            let (open_x, shut_x) = if spec.wink_left() {
-                (face.rx, face.lx)
-            } else {
-                (face.lx, face.rx)
-            };
-            solid_eye(ctx, spec, k, open_x, face, cols);
-            eye_arc(ctx, k, shut_x, face.ey, 5.0 * spec.eye_scale, cols.fg);
-        }
-        Mood::Idle | Mood::Sleepy | Mood::Wow => {
-            solid_eye(ctx, spec, k, face.lx, face, cols);
-            solid_eye(ctx, spec, k, face.rx, face, cols);
-        }
-    }
-    draw_mouth(ctx, spec, k, face, cols.fg);
-}
-
-fn solid_eye(ctx: &mut Ctx<'_>, spec: &Spec, k: f32, x: f32, face: &Face, cols: &Colors) {
-    let (rx, ry) = match spec.mood {
-        Mood::Sleepy => (face.ex * 1.25, face.ey_r * 0.38),
-        Mood::Wow => (face.ex * 1.35, face.ex * 1.35),
-        _ => (face.ex, face.ey_r),
-    };
+fn fill_rect(ctx: &mut Ctx<'_>, k: f32, x: f32, y: f32, w: f32, h: f32, fill: &str) {
     ctx.out().push_str(&format!(
-        r#"<ellipse cx="{}" cy="{}" rx="{}" ry="{}" fill="{}"/>"#,
+        r#"<rect x="{}" y="{}" width="{}" height="{}" fill="{fill}"/>"#,
+        n(x * k),
+        n(y * k),
+        n(w * k),
+        n(h * k)
+    ));
+}
+
+fn poly(ctx: &mut Ctx<'_>, k: f32, pts: &[(f32, f32)], fill: &str) {
+    let mut path = Path::new(k);
+    let (x, y) = pts[0];
+    path.m(x, y);
+    for &(px, py) in &pts[1..] {
+        path.l(px, py);
+    }
+    path.z();
+    ctx.write_path(&path.d, &format!(r#"fill="{fill}""#));
+}
+
+fn wave(ctx: &mut Ctx<'_>, k: f32, y: f32, amp: f32, color: &str) {
+    let mut path = Path::new(k);
+    path.m(0.0, y);
+    path.q(12.0, y - amp, 25.0, y);
+    path.q(38.0, y + amp, 50.0, y);
+    path.q(62.0, y - amp, 75.0, y);
+    path.q(88.0, y + amp, 100.0, y);
+    ctx.out().push_str(&format!(
+        r#"<path d="{}" fill="none" stroke="{color}" stroke-width="{}" stroke-linecap="round"/>"#,
+        path.d,
+        n(1.7 * k)
+    ));
+}
+
+fn pine(ctx: &mut Ctx<'_>, k: f32, x: f32, tip: f32) {
+    poly(
+        ctx,
+        k,
+        &[(x, tip), (x - 7.5, tip + 16.0), (x + 7.5, tip + 16.0)],
+        "#1e6b38",
+    );
+    poly(
+        ctx,
+        k,
+        &[
+            (x, tip + 10.0),
+            (x - 11.0, tip + 30.0),
+            (x + 11.0, tip + 30.0),
+        ],
+        "#164e2a",
+    );
+    fill_rect(ctx, k, x - 1.5, tip + 28.0, 3.0, 9.0, "#6b4423");
+}
+
+fn cloud(ctx: &mut Ctx<'_>, k: f32, x: f32, y: f32) {
+    ctx.out().push_str(&format!(
+        r##"<g fill="#ffffff"><ellipse cx="{}" cy="{}" rx="{}" ry="{}"/><ellipse cx="{}" cy="{}" rx="{}" ry="{}"/><ellipse cx="{}" cy="{}" rx="{}" ry="{}"/></g>"##,
+        n((x - 6.0) * k),
+        n((y + 1.5) * k),
+        n(7.0 * k),
+        n(4.2 * k),
+        n(x * k),
+        n(y * k),
+        n(9.0 * k),
+        n(5.4 * k),
+        n((x + 7.0) * k),
+        n((y + 1.2) * k),
+        n(6.2 * k),
+        n(3.8 * k)
+    ));
+}
+
+fn draw_scene(ctx: &mut Ctx<'_>, k: f32, bg: Backdrop) {
+    match bg {
+        Backdrop::Sky => {
+            fill_rect(ctx, k, 0.0, 0.0, 100.0, 100.0, "#7ec8f8");
+            ctx.write_circle(84.0 * k, 16.0 * k, 8.0 * k, "#ffe566", 1.0);
+            cloud(ctx, k, 18.0, 18.0);
+            cloud(ctx, k, 14.0, 72.0);
+        }
+        Backdrop::Mountain => {
+            fill_rect(ctx, k, 0.0, 0.0, 100.0, 100.0, "#8ecaf6");
+            ctx.write_circle(84.0 * k, 14.0 * k, 7.0 * k, "#ffe566", 1.0);
+            poly(
+                ctx,
+                k,
+                &[
+                    (0.0, 82.0),
+                    (18.0, 52.0),
+                    (36.0, 68.0),
+                    (54.0, 48.0),
+                    (72.0, 64.0),
+                    (88.0, 46.0),
+                    (100.0, 62.0),
+                    (100.0, 100.0),
+                    (0.0, 100.0),
+                ],
+                "#9aa8b8",
+            );
+            poly(
+                ctx,
+                k,
+                &[(0.0, 100.0), (0.0, 72.0), (14.0, 46.0), (30.0, 100.0)],
+                "#4f7d52",
+            );
+            poly(
+                ctx,
+                k,
+                &[(70.0, 100.0), (86.0, 42.0), (100.0, 64.0), (100.0, 100.0)],
+                "#3e6844",
+            );
+            poly(
+                ctx,
+                k,
+                &[(10.5, 54.0), (14.0, 46.0), (17.5, 54.0)],
+                "#f7fbff",
+            );
+            poly(
+                ctx,
+                k,
+                &[(82.5, 50.0), (86.0, 42.0), (89.5, 50.0)],
+                "#f7fbff",
+            );
+        }
+        Backdrop::Sea => {
+            fill_rect(ctx, k, 0.0, 0.0, 100.0, 46.0, "#7ec8f8");
+            fill_rect(ctx, k, 0.0, 44.0, 100.0, 56.0, "#1277b8");
+            ctx.write_circle(16.0 * k, 44.0 * k, 8.0 * k, "#ffe566", 1.0);
+            wave(ctx, k, 58.0, 3.2, "#d7f4ff");
+            wave(ctx, k, 72.0, 2.6, "#7fd4f0");
+            wave(ctx, k, 86.0, 2.2, "#d7f4ff");
+        }
+        Backdrop::Forest => {
+            fill_rect(ctx, k, 0.0, 0.0, 100.0, 100.0, "#b7e3fb");
+            fill_rect(ctx, k, 0.0, 74.0, 100.0, 26.0, "#3e9a45");
+            ctx.write_circle(82.0 * k, 16.0 * k, 6.5 * k, "#ffe566", 1.0);
+            pine(ctx, k, 12.0, 22.0);
+            pine(ctx, k, 88.0, 28.0);
+            cloud(ctx, k, 48.0, 12.0);
+        }
+        Backdrop::Sunset => {
+            fill_rect(ctx, k, 0.0, 0.0, 100.0, 34.0, "#ffb15e");
+            fill_rect(ctx, k, 0.0, 34.0, 100.0, 24.0, "#ff6d4a");
+            fill_rect(ctx, k, 0.0, 58.0, 100.0, 42.0, "#3a2218");
+            ctx.write_circle(14.0 * k, 50.0 * k, 9.0 * k, "#ffe9a0", 1.0);
+            poly(
+                ctx,
+                k,
+                &[
+                    (0.0, 100.0),
+                    (0.0, 70.0),
+                    (18.0, 62.0),
+                    (34.0, 74.0),
+                    (66.0, 64.0),
+                    (84.0, 76.0),
+                    (100.0, 66.0),
+                    (100.0, 100.0),
+                ],
+                "#24140f",
+            );
+        }
+        Backdrop::Beach => {
+            fill_rect(ctx, k, 0.0, 0.0, 100.0, 42.0, "#7ec8f8");
+            ctx.write_circle(84.0 * k, 16.0 * k, 7.0 * k, "#ffe566", 1.0);
+            fill_rect(ctx, k, 0.0, 38.0, 100.0, 30.0, "#2f9fd0");
+            fill_rect(ctx, k, 0.0, 66.0, 100.0, 34.0, "#f2d2a0");
+            wave(ctx, k, 48.0, 2.4, "#d7f4ff");
+            wave(ctx, k, 58.0, 2.0, "#9fe3f5");
+        }
+        Backdrop::Night => {
+            fill_rect(ctx, k, 0.0, 0.0, 100.0, 100.0, "#101a38");
+            ctx.write_circle(16.0 * k, 18.0 * k, 8.0 * k, "#f4efd0", 1.0);
+            ctx.write_circle(19.4 * k, 15.6 * k, 6.4 * k, "#101a38", 1.0);
+            for (x, y, r) in [
+                (74.0, 12.0, 1.1),
+                (86.0, 20.0, 0.8),
+                (92.0, 10.0, 1.3),
+                (78.0, 32.0, 0.7),
+                (68.0, 18.0, 0.6),
+                (88.0, 42.0, 0.9),
+            ] {
+                ctx.write_circle(x * k, y * k, r * k, "#fff6c2", 1.0);
+            }
+            poly(
+                ctx,
+                k,
+                &[
+                    (0.0, 100.0),
+                    (0.0, 78.0),
+                    (22.0, 86.0),
+                    (40.0, 74.0),
+                    (62.0, 88.0),
+                    (82.0, 72.0),
+                    (100.0, 82.0),
+                    (100.0, 100.0),
+                ],
+                "#1a2748",
+            );
+        }
+        Backdrop::Snow => {
+            fill_rect(ctx, k, 0.0, 0.0, 100.0, 100.0, "#d6e8f8");
+            poly(
+                ctx,
+                k,
+                &[
+                    (0.0, 100.0),
+                    (0.0, 70.0),
+                    (24.0, 78.0),
+                    (46.0, 64.0),
+                    (70.0, 80.0),
+                    (100.0, 62.0),
+                    (100.0, 100.0),
+                ],
+                "#ffffff",
+            );
+            pine(ctx, k, 14.0, 36.0);
+            for (x, y) in [(78.0, 14.0), (88.0, 24.0), (70.0, 28.0), (92.0, 12.0)] {
+                ctx.write_circle(x * k, y * k, 1.3 * k, "#ffffff", 0.95);
+            }
+        }
+    }
+}
+
+fn draw_face(ctx: &mut Ctx<'_>, k: f32, face: &Face) {
+    ctx.write_circle(
+        (face.lx - 6.2) * k,
+        (face.ey + 8.0) * k,
+        3.7 * k,
+        BLUSH,
+        0.34,
+    );
+    ctx.write_circle(
+        (face.rx + 6.2) * k,
+        (face.ey + 8.0) * k,
+        3.7 * k,
+        BLUSH,
+        0.34,
+    );
+    solid_eye(ctx, k, face.lx, face);
+    solid_eye(ctx, k, face.rx, face);
+    smile(ctx, k, face, 6.4, 3.4, INK);
+}
+
+fn solid_eye(ctx: &mut Ctx<'_>, k: f32, x: f32, face: &Face) {
+    let rx = face.ex;
+    let ry = face.ey_r;
+    ctx.out().push_str(&format!(
+        r#"<ellipse cx="{}" cy="{}" rx="{}" ry="{}" fill="{INK}"/>"#,
         n(x * k),
         n(face.ey * k),
         n(rx * k),
-        n(ry * k),
-        cols.fg
+        n(ry * k)
     ));
-    if !cols.light {
-        let pr = if spec.mood == Mood::Wow {
-            rx * 0.46
-        } else {
-            rx * 0.42
-        };
-        ctx.write_circle(
-            (x + spec.gaze_x * 0.25) * k,
-            (face.ey + spec.gaze_y * 0.2) * k,
-            pr * k,
-            INK,
-            1.0,
-        );
-    }
     ctx.write_circle(
         (x - rx * 0.28) * k,
         (face.ey - ry * 0.32) * k,
@@ -949,104 +689,16 @@ fn solid_eye(ctx: &mut Ctx<'_>, spec: &Spec, k: f32, x: f32, face: &Face, cols: 
         PAPER,
         0.85,
     );
-
-    if ctx.animated && spec.mood != Mood::Wow {
+    if ctx.animated {
         let blink = format_dur(3.4 + f32::from(ctx.hash[27] % 10) * 0.2);
         ctx.out().push_str(&format!(
-            r#"<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{tiny}" fill="{body}"><animate attributeName="ry" values="{tiny};{tiny};{ry};{tiny};{tiny}" keyTimes="0;0.42;0.48;0.54;1" dur="{blink}s" repeatCount="indefinite"/></ellipse>"#,
+            r#"<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{tiny}" fill="{FACE}"><animate attributeName="ry" values="{tiny};{tiny};{ry};{tiny};{tiny}" keyTimes="0;0.42;0.48;0.54;1" dur="{blink}s" repeatCount="indefinite"/></ellipse>"#,
             cx = n(x * k),
             cy = n(face.ey * k),
             rx = n(rx * k),
             ry = n(ry * k),
             tiny = n(0.2 * k),
-            body = cols.body,
         ));
-    }
-}
-
-fn eye_arc(ctx: &mut Ctx<'_>, k: f32, x: f32, y: f32, w: f32, color: &str) {
-    let mut p = Path::new(k);
-    p.m(x - w, y + 0.4);
-    p.q(x, y - w * 0.95, x + w, y + 0.4);
-    ctx.out().push_str(&format!(
-        r#"<path d="{}" fill="none" stroke="{color}" stroke-width="{}" stroke-linecap="round"/>"#,
-        p.d,
-        n(1.9 * k)
-    ));
-}
-
-fn heart(ctx: &mut Ctx<'_>, k: f32, cx: f32, cy: f32, s: f32, color: &str) {
-    let mut p = Path::new(k);
-    p.m(cx, cy + s * 0.85);
-    p.c(
-        cx - s * 0.15,
-        cy + s * 0.35,
-        cx - s * 1.15,
-        cy + s * 0.45,
-        cx - s * 1.15,
-        cy - s * 0.15,
-    );
-    p.c(
-        cx - s * 1.15,
-        cy - s * 0.85,
-        cx - s * 0.15,
-        cy - s * 0.95,
-        cx,
-        cy - s * 0.25,
-    );
-    p.c(
-        cx + s * 0.15,
-        cy - s * 0.95,
-        cx + s * 1.15,
-        cy - s * 0.85,
-        cx + s * 1.15,
-        cy - s * 0.15,
-    );
-    p.c(
-        cx + s * 1.15,
-        cy + s * 0.45,
-        cx + s * 0.15,
-        cy + s * 0.35,
-        cx,
-        cy + s * 0.85,
-    );
-    p.z();
-    ctx.write_path(&p.d, &format!(r#"fill="{color}""#));
-    ctx.write_circle(
-        (cx - s * 0.38) * k,
-        (cy - s * 0.28) * k,
-        s * 0.18 * k,
-        PAPER,
-        0.7,
-    );
-}
-
-fn draw_mouth(ctx: &mut Ctx<'_>, spec: &Spec, k: f32, face: &Face, color: &str) {
-    match spec.mood {
-        Mood::Wow => {
-            ctx.out().push_str(&format!(
-                r#"<ellipse cx="{}" cy="{}" rx="{}" ry="{}" fill="{color}"/>"#,
-                n(face.mx * k),
-                n((face.my + 1.0) * k),
-                n(3.3 * spec.mouth_scale * k),
-                n(4.3 * spec.mouth_scale * k)
-            ));
-        }
-        Mood::Sleepy => {
-            let mut p = Path::new(k);
-            let w = 5.2 * spec.mouth_scale;
-            p.m(face.mx - w, face.my);
-            p.q(face.mx, face.my + 1.4, face.mx + w, face.my);
-            ctx.out().push_str(&format!(
-                r#"<path d="{}" fill="none" stroke="{color}" stroke-width="{}" stroke-linecap="round"/>"#,
-                p.d,
-                n(1.5 * k)
-            ));
-        }
-        Mood::Idle => smile(ctx, k, face, 6.4 * spec.mouth_scale, 3.4, color),
-        Mood::Happy | Mood::Wink | Mood::Love => {
-            smile(ctx, k, face, 8.4 * spec.mouth_scale, 5.6, color)
-        }
     }
 }
 
@@ -1319,7 +971,7 @@ fn aviator(p: &mut Path, ex: f32, ey: f32, dir: f32) {
 
 fn draw_neck(ctx: &mut Ctx<'_>, spec: &Spec, k: f32, m: &Metrics, cols: &Colors) {
     let y = m.neck;
-    let cloth = if cols.light { INK } else { PAPER };
+    let cloth = INK;
     match spec.neck {
         Neck::None => {}
         Neck::Scarf => {
@@ -1808,46 +1460,33 @@ mod tests {
 
     fn baseline() -> Spec {
         Spec {
-            shape: Shape::Round,
             hat: Hat::None,
             glasses: Glasses::None,
             neck: Neck::None,
-            bg: Some(Backdrop::Disc),
-            mood: Mood::Idle,
+            bg: Some(Backdrop::Sky),
             flip: 0,
-            gaze_x: 0.0,
-            gaze_y: 0.0,
-            eye_scale: 1.0,
-            mouth_scale: 1.0,
-            tilt: 0.0,
-            organic: [0.5; 10],
-            blush: true,
-            freckles: false,
         }
     }
 
-    #[test]
-    fn luminance_splits_paper_and_ink() {
-        assert!(luminance("#ffffff") > 0.95);
-        assert!(luminance("#000000") < 0.02);
-        assert!(luminance(PAPER) > 0.8);
-        assert!(luminance(INK) < 0.1);
+    fn ink_eyes(svg: &str) -> String {
+        let mut eyes = String::new();
+        let mut rest = svg;
+        while let Some(i) = rest.find("<ellipse") {
+            let end = i + rest[i..].find("/>").unwrap() + 2;
+            let el = &rest[i..end];
+            if el.contains(r##"fill="#1c1917""##) {
+                eyes.push_str(el);
+            }
+            rest = &rest[end..];
+        }
+        eyes
     }
 
     #[test]
     fn each_variant_changes_the_picture() {
         let bare = paint_svg(&baseline(), 1);
-        for shape in Shape::ALL {
-            let svg = paint_svg(
-                &Spec {
-                    shape,
-                    ..baseline()
-                },
-                2,
-            );
-            assert_ne!(svg, bare, "{}", shape.name());
-            assert!(svg.contains(&format!(r#"data-shape="{}""#, shape.name())));
-        }
+        assert!(bare.contains(r#"data-shape="round""#));
+        assert!(bare.contains(r#"data-mood="smile""#));
         for hat in Hat::ALL.into_iter().filter(|h| *h != Hat::None) {
             let svg = paint_svg(&Spec { hat, ..baseline() }, 3);
             assert_ne!(svg, bare, "{}", hat.name());
@@ -1866,7 +1505,7 @@ mod tests {
             let svg = paint_svg(&Spec { neck, ..baseline() }, 5);
             assert_ne!(svg, bare, "{}", neck.name());
         }
-        for bg in Backdrop::ALL.into_iter().filter(|b| *b != Backdrop::Disc) {
+        for bg in Backdrop::ALL.into_iter().filter(|b| *b != Backdrop::Sky) {
             let svg = paint_svg(
                 &Spec {
                     bg: Some(bg),
@@ -1875,10 +1514,7 @@ mod tests {
                 6,
             );
             assert_ne!(svg, bare, "{}", bg.name());
-        }
-        for mood in Mood::ALL.into_iter().filter(|m| *m != Mood::Idle) {
-            let svg = paint_svg(&Spec { mood, ..baseline() }, 7);
-            assert_ne!(svg, bare, "{}", mood.name());
+            assert!(svg.contains(&format!(r#"data-bg="{}""#, bg.name())));
         }
     }
 
@@ -1891,7 +1527,8 @@ mod tests {
         };
         let svg = render_identicon_inner("alice", &opts).unwrap();
         assert!(svg.contains(r#"data-bg="none""#));
-        assert!(!svg.contains(r#"data-bg="disc""#));
+        assert!(!svg.contains("#7ec8f8"));
+        assert!(!svg.contains("#1277b8"));
     }
 
     #[test]
@@ -1906,21 +1543,26 @@ mod tests {
             engine: Engine::Character,
             ..RenderOptions::default()
         };
+        let eyes = ink_eyes(&render_identicon_inner("alice", &opts).unwrap());
+        assert!(eyes.contains("<ellipse"));
         for i in 0..240 {
-            let svg = render_identicon_inner(&format!("person-{i}"), &opts).unwrap();
+            let name = format!("person-{i}");
+            let svg = render_identicon_inner(&name, &opts).unwrap();
             shapes.insert(attr(&svg, "data-shape"));
             hats.insert(attr(&svg, "data-hat"));
             glasses.insert(attr(&svg, "data-glasses"));
             necks.insert(attr(&svg, "data-neck"));
             backs.insert(attr(&svg, "data-bg"));
             moods.insert(attr(&svg, "data-mood"));
+            assert_eq!(ink_eyes(&svg), eyes, "{name}");
+            assert!(svg.contains(r##"fill="#8fd0ef""##), "{name}");
             assert!(svg.len() < 12 * 1024, "{}", svg.len());
         }
-        assert_eq!(shapes.len(), Shape::ALL.len());
+        assert_eq!(shapes.into_iter().collect::<Vec<_>>(), vec!["round"]);
         assert_eq!(hats.len(), Hat::ALL.len());
         assert_eq!(glasses.len(), Glasses::ALL.len());
         assert_eq!(necks.len(), Neck::ALL.len());
         assert_eq!(backs.len(), Backdrop::ALL.len());
-        assert_eq!(moods.len(), Mood::ALL.len());
+        assert_eq!(moods.into_iter().collect::<Vec<_>>(), vec!["smile"]);
     }
 }

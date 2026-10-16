@@ -132,7 +132,7 @@ Local `npm publish` still needs `npm login` and membership in the `@janus-iam` o
 | `ribbon` | Interlaced Lissajous ribbons |
 | `constellation` | Linked stars with one principal star |
 | `monogram` | Initials over a generative motif (falls back to `crest` when the input has no letter) |
-| `character` | Layered character: silhouette and expression, plus a hat, glasses, a neck accessory, and a badge background |
+| `character` | Layered character: one shared face, plus a hat, glasses, a neck accessory, and a scenic background (sky, mountain, sea, forest, sunset, beach, night, snow) |
 
 ## Development
 
