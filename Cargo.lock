@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "identicon-api"
-version = "0.1.11"
+version = "0.2.2"
 dependencies = [
  "axum",
  "blake3",
@@ -422,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "identicon-core"
-version = "0.1.11"
+version = "0.2.2"
 dependencies = [
  "blake3",
  "rand_xoshiro",
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "identicon-wasm"
-version = "0.1.11"
+version = "0.2.2"
 dependencies = [
  "identicon-core",
  "wasm-bindgen",
@@ -955,9 +955,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.53.3"
+version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "libc",
  "mio",
